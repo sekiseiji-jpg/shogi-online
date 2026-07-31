@@ -1,0 +1,16 @@
+{
+  "name": "shogi-online",
+  "version": "1.0.0",
+  "description": "本将棋 オンライン対戦（人間同士）",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "ws": "^8.17.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

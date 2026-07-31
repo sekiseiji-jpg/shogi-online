@@ -1,0 +1,355 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>本将棋 オンライン対戦</title>
+<style>
+  :root{--wood:#e8b968;--wood-dark:#c8933b;--line:#4a3010;--koma-edge:#7a5216;--koma1:#fbe7bd;--koma2:#e6c477;
+    --bg:#1c1712;--panel:#2a2018;--text:#f4e9d4;--accent:#d8a24a;}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;background:var(--bg);color:var(--text);font-family:"Hiragino Mincho ProN","Yu Mincho",serif;-webkit-user-select:none;user-select:none;}
+  #app{max-width:560px;margin:0 auto;padding:10px 8px 30px;}
+  h1{text-align:center;font-size:20px;letter-spacing:.12em;margin:6px 0;color:var(--accent);text-shadow:0 1px 0 #000;}
+  .hidden{display:none !important;}
+
+  /* ロビー */
+  .lobby{background:var(--panel);border:1px solid #5a4630;border-radius:12px;padding:16px;margin-top:8px;}
+  .lobby p{font-size:13px;color:#c9b48c;line-height:1.7;margin:0 0 10px;}
+  .lobby label{display:block;font-size:13px;color:#c9b48c;margin:10px 0 4px;}
+  .lobby input{width:100%;padding:10px;border-radius:8px;border:1px solid #5a4630;background:#1c1712;color:var(--text);font-size:16px;font-family:inherit;}
+  .lobby button{width:100%;margin-top:14px;padding:12px;border:none;border-radius:10px;background:var(--accent);color:#241a12;font-weight:700;font-size:16px;font-family:inherit;cursor:pointer;}
+
+  .bar{display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin:6px 0;}
+  .bar button{background:var(--panel);color:var(--text);border:1px solid #5a4630;border-radius:8px;padding:7px 12px;font-size:14px;font-family:inherit;cursor:pointer;}
+  .bar button:active{transform:translateY(1px);}
+
+  .stand{background:linear-gradient(160deg,#3a2c1c,#241a12);border:2px solid #5a4630;border-radius:10px;padding:6px 8px;min-height:50px;display:flex;flex-wrap:wrap;gap:4px;align-items:center;}
+  .stand.top{margin-bottom:8px;} .stand.bottom{margin-top:8px;}
+  .stand-label{font-size:12px;color:#c9b48c;width:100%;margin-bottom:2px;display:flex;justify-content:space-between;align-items:center;}
+  .turn-dot{width:10px;height:10px;border-radius:50%;background:#555;display:inline-block;margin-left:6px;}
+  .turn-dot.on{background:#6ad06a;box-shadow:0 0 6px #6ad06a;}
+  .hand-piece{position:relative;cursor:pointer;}
+  .hand-count{position:absolute;right:-3px;bottom:-4px;background:#b03030;color:#fff;font-size:11px;line-height:1;padding:1px 4px;border-radius:8px;font-family:sans-serif;border:1px solid #fff;}
+
+  .board{display:grid;grid-template-columns:repeat(9,1fr);grid-template-rows:repeat(9,1fr);aspect-ratio:1/1;width:100%;
+    background:linear-gradient(150deg,var(--wood),var(--wood-dark));border:6px solid #6b4a1e;border-radius:4px;
+    box-shadow:0 8px 22px rgba(0,0,0,.55),inset 0 0 30px rgba(120,70,10,.35);position:relative;}
+  .cell{position:relative;display:flex;align-items:center;justify-content:center;border-right:1px solid var(--line);border-bottom:1px solid var(--line);}
+  .cell[data-dc="0"]{border-left:1px solid var(--line);} .cell[data-dr="0"]{border-top:1px solid var(--line);}
+  .cell.sel{background:rgba(255,220,90,.5);}
+  .cell.lastto{background:rgba(120,180,255,.4);} .cell.lastfrom{background:rgba(120,180,255,.22);}
+  .dot{position:absolute;width:26%;height:26%;border-radius:50%;background:rgba(30,90,30,.5);pointer-events:none;}
+  .dot.cap{width:78%;height:78%;border-radius:8px;background:transparent;border:3px solid rgba(200,40,40,.7);}
+  .koma{width:86%;height:86%;position:relative;cursor:pointer;display:flex;align-items:center;justify-content:center;filter:drop-shadow(0 2px 2px rgba(0,0,0,.4));}
+  .koma .edge{position:absolute;inset:0;background:var(--koma-edge);clip-path:polygon(50% 3%,82% 22%,92% 97%,8% 97%,18% 22%);transform:scale(1.06);z-index:0;}
+  .koma .shape{position:absolute;inset:0;z-index:1;background:linear-gradient(160deg,var(--koma1),var(--koma2));clip-path:polygon(50% 3%,82% 22%,92% 97%,8% 97%,18% 22%);}
+  .koma .label{position:relative;z-index:2;font-weight:700;line-height:.92;color:#2a1a06;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:min(4.6vw,26px);}
+  .koma.two .label{font-size:min(3.1vw,17px);}
+  .koma.promoted .label{color:#a3241a;}
+  .koma.flip{transform:rotate(180deg);}
+  .koma.hand{width:30px;height:33px;} .koma.hand .label{font-size:16px;}
+
+  .status{text-align:center;margin:6px 0;font-size:15px;min-height:22px;}
+  .status.warn{color:#ffd27a;} .status.check{color:#ff8a6a;font-weight:700;}
+  .info{text-align:center;font-size:12px;color:#a99;margin-top:6px;}
+  .kifu-wrap{margin-top:10px;background:var(--panel);border:1px solid #5a4630;border-radius:10px;padding:8px 10px;}
+  .kifu-head{font-size:12px;color:#c9b48c;margin-bottom:4px;}
+  .kifu{max-height:110px;overflow-y:auto;font-size:14px;line-height:1.6;}
+  .kifu .no{color:#9a8a6a;font-size:12px;font-family:sans-serif;margin-right:6px;}
+  .chat-wrap{margin-top:8px;background:var(--panel);border:1px solid #5a4630;border-radius:10px;padding:8px 10px;}
+  .chat-log{max-height:80px;overflow-y:auto;font-size:13px;line-height:1.6;}
+  .chat-log b{color:var(--accent);}
+  .chat-row{display:flex;gap:6px;margin-top:6px;}
+  .chat-row input{flex:1;padding:8px;border-radius:8px;border:1px solid #5a4630;background:#1c1712;color:var(--text);font-family:inherit;font-size:14px;}
+  .chat-row button{padding:8px 12px;border:none;border-radius:8px;background:var(--accent);color:#241a12;font-weight:700;font-family:inherit;cursor:pointer;}
+
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:50;}
+  .overlay.on{display:flex;}
+  .dialog{background:var(--panel);border:2px solid var(--accent);border-radius:14px;padding:20px 24px;text-align:center;max-width:300px;}
+  .dialog p{margin:0 0 16px;font-size:16px;} .dialog .btns{display:flex;gap:12px;justify-content:center;}
+  .dialog button{padding:10px 18px;font-size:15px;border-radius:10px;border:none;cursor:pointer;font-family:inherit;font-weight:700;}
+  .dialog .yes{background:var(--accent);color:#241a12;} .dialog .no{background:#544;color:#fff;}
+  .result{position:fixed;inset:0;background:rgba(0,0,0,.75);display:none;align-items:center;justify-content:center;z-index:60;flex-direction:column;gap:16px;}
+  .result.on{display:flex;}
+  .result h2{font-size:34px;color:var(--accent);margin:0;text-align:center;text-shadow:0 2px 6px #000;}
+  .result button{padding:12px 24px;font-size:16px;border-radius:12px;border:none;background:var(--accent);color:#241a12;font-weight:700;font-family:inherit;cursor:pointer;}
+</style>
+
+<div id="app">
+  <h1>本将棋 オンライン対戦</h1>
+
+  <div class="lobby" id="lobby">
+    <p>友だちと同じ<b>合言葉</b>を入れて「入室」すると対局できます。先に入った人が先手（▲）、次の人が後手（△）です。3人目からは観戦になります。</p>
+    <label>お名前</label>
+    <input id="nameInput" maxlength="20" placeholder="例：せき">
+    <label>合言葉（部屋名）</label>
+    <input id="roomInput" maxlength="40" placeholder="例：たいきょく123">
+    <button id="joinBtn">入室する</button>
+    <p id="lobbyMsg" style="color:#ff8a6a"></p>
+  </div>
+
+  <div id="game" class="hidden">
+    <div class="bar">
+      <button id="resignBtn">投了</button>
+      <button id="leaveBtn">退室</button>
+      <span id="connState" style="align-self:center;font-size:12px;color:#a99;"></span>
+    </div>
+    <div class="stand top" id="standTop">
+      <div class="stand-label"><span id="topName">相手</span><span><span id="topDot" class="turn-dot"></span></span></div>
+    </div>
+    <div class="board" id="board"></div>
+    <div class="status" id="status">対局相手を待っています…</div>
+    <div class="stand bottom" id="standBottom">
+      <div class="stand-label"><span id="botName">あなた</span><span><span id="botDot" class="turn-dot"></span></span></div>
+    </div>
+    <div class="kifu-wrap"><div class="kifu-head">棋譜</div><div class="kifu" id="kifu"></div></div>
+    <div class="chat-wrap">
+      <div class="chat-log" id="chatLog"></div>
+      <div class="chat-row"><input id="chatInput" maxlength="200" placeholder="チャット"><button id="chatSend">送信</button></div>
+    </div>
+    <div class="info">合言葉：<b id="roomLabel"></b>　あなた：<b id="colorLabel"></b></div>
+  </div>
+</div>
+
+<div class="overlay" id="promoOverlay"><div class="dialog"><p id="promoText">成りますか？</p>
+  <div class="btns"><button class="yes" id="promoYes">成る</button><button class="no" id="promoNo">不成</button></div></div></div>
+<div class="result" id="result"><h2 id="resultText"></h2><button id="resultBtn">再戦を申し込む</button></div>
+
+<script>
+"use strict";
+/* ================= 将棋エンジン（本体アプリと同一ルール） ================= */
+const KANJI={K:{n:'玉',p:null},R:{n:'飛',p:'龍'},B:{n:'角',p:'馬'},G:{n:'金',p:null},S:{n:'銀',p:'成銀'},N:{n:'桂',p:'成桂'},L:{n:'香',p:'成香'},P:{n:'歩',p:'と'}};
+const KING_LABEL={0:'王',1:'玉'};
+const STEP={G:[[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,0]],S:[[-1,-1],[-1,0],[-1,1],[1,-1],[1,1]],K:[[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]],N:[[-2,-1],[-2,1]],P:[[-1,0]]};
+const GOLD=STEP.G;
+const SLIDE={R:[[-1,0],[1,0],[0,-1],[0,1]],B:[[-1,-1],[-1,1],[1,-1],[1,1]],L:[[-1,0]]};
+function initBoard(){const b=Array.from({length:9},()=>Array(9).fill(null));const back=['L','N','S','G','K','G','S','N','L'];
+  for(let c=0;c<9;c++){b[0][c]={t:back[c],o:1,p:false};b[2][c]={t:'P',o:1,p:false};b[8][c]={t:back[c],o:0,p:false};b[6][c]={t:'P',o:0,p:false};}
+  b[7][7]={t:'R',o:0,p:false};b[7][1]={t:'B',o:0,p:false};b[1][1]={t:'R',o:1,p:false};b[1][7]={t:'B',o:1,p:false};return b;}
+function inZone(r,o){return o===0?r<=2:r>=6;}
+function lastRow(r,o){return o===0?r===0:r===8;}
+function mustPromote(pc,r){if(pc.p)return false;if(pc.t==='P'||pc.t==='L')return lastRow(r,pc.o);if(pc.t==='N')return pc.o===0?r<=1:r>=7;return false;}
+function canPromote(pc,fr,tr){if(pc.p)return false;if(pc.t==='K'||pc.t==='G')return false;return inZone(fr,pc.o)||inZone(tr,pc.o);}
+function pieceMoves(b,r,c){const pc=b[r][c],res=[],o=pc.o,dm=o===0?1:-1;
+  const add=(nr,nc)=>{if(nr<0||nr>8||nc<0||nc>8)return false;const t=b[nr][nc];if(t&&t.o===o)return false;res.push([nr,nc]);return !t;};
+  let sl=null,sd=null;
+  if(pc.p){if(pc.t==='R'){sd=SLIDE.R;sl=[[-1,-1],[-1,1],[1,-1],[1,1]];}else if(pc.t==='B'){sd=SLIDE.B;sl=[[-1,0],[1,0],[0,-1],[0,1]];}else sl=GOLD;}
+  else{if(pc.t==='R')sd=SLIDE.R;else if(pc.t==='B')sd=SLIDE.B;else if(pc.t==='L')sd=SLIDE.L;else sl=STEP[pc.t];}
+  if(sl)for(const[dr,dc]of sl)add(r+dr*dm,c+dc);
+  if(sd)for(const[dr,dc]of sd){let nr=r,nc=c;while(true){nr+=dr*dm;nc+=dc;if(!add(nr,nc))break;}}
+  return res;}
+function findKing(b,o){for(let r=0;r<9;r++)for(let c=0;c<9;c++){const p=b[r][c];if(p&&p.t==='K'&&p.o===o)return[r,c];}return null;}
+function inCheck(b,o){const k=findKing(b,o);if(!k)return true;const[kr,kc]=k;
+  for(let r=0;r<9;r++)for(let c=0;c<9;c++){const p=b[r][c];if(p&&p.o!==o)for(const[mr,mc]of pieceMoves(b,r,c))if(mr===kr&&mc===kc)return true;}return false;}
+function pushOpts(res,b,r,c,tr,tc){const pc=b[r][c];const f=mustPromote(pc,tr),cp=canPromote(pc,r,tr);
+  if(f)res.push({fr:r,fc:c,tr,tc,promote:true,drop:false});
+  else if(cp){res.push({fr:r,fc:c,tr,tc,promote:true,drop:false});res.push({fr:r,fc:c,tr,tc,promote:false,drop:false});}
+  else res.push({fr:r,fc:c,tr,tc,promote:false,drop:false});}
+function genMoves(st,o){const b=st.board,mv=[];
+  for(let r=0;r<9;r++)for(let c=0;c<9;c++){const pc=b[r][c];if(!pc||pc.o!==o)continue;for(const[tr,tc]of pieceMoves(b,r,c))pushOpts(mv,b,r,c,tr,tc);}
+  const hand=st.hands[o],types=Object.keys(hand).filter(t=>hand[t]>0);
+  if(types.length){const pcol=Array(9).fill(false);
+    for(let r=0;r<9;r++)for(let c=0;c<9;c++){const p=b[r][c];if(p&&p.o===o&&p.t==='P'&&!p.p)pcol[c]=true;}
+    for(let r=0;r<9;r++)for(let c=0;c<9;c++){if(b[r][c])continue;for(const t of types){
+      if((t==='P'||t==='L')&&lastRow(r,o))continue;if(t==='N'&&(o===0?r<=1:r>=7))continue;if(t==='P'&&pcol[c])continue;
+      mv.push({fr:-1,fc:t,tr:r,tc:c,promote:false,drop:true});}}}
+  return mv;}
+function clone(st){return{board:st.board.map(r=>r.map(c=>c?{t:c.t,o:c.o,p:c.p}:null)),hands:[{...st.hands[0]},{...st.hands[1]}],turn:st.turn};}
+function applyMove(st,mv){const b=st.board,o=st.turn;
+  if(mv.drop){b[mv.tr][mv.tc]={t:mv.fc,o,p:false};st.hands[o][mv.fc]--;}
+  else{const pc=b[mv.fr][mv.fc],cap=b[mv.tr][mv.tc];if(cap)st.hands[o][cap.t]=(st.hands[o][cap.t]||0)+1;
+    b[mv.tr][mv.tc]={t:pc.t,o:pc.o,p:pc.p||mv.promote};b[mv.fr][mv.fc]=null;}
+  st.turn=o^1;}
+function capturesKing(st,mv){if(mv.drop)return false;const t=st.board[mv.tr][mv.tc];return !!(t&&t.t==='K');}
+function legalMoves(st,o){const res=[];for(const mv of genMoves(st,o)){if(capturesKing(st,mv))continue;const s=clone(st);s.turn=o;applyMove(s,mv);
+  if(!inCheck(s.board,o)){if(mv.drop&&mv.fc==='P'&&dropPawnMate(st,mv,o))continue;res.push(mv);}}return res;}
+function legalNoDP(st,o){const res=[];for(const mv of genMoves(st,o)){if(capturesKing(st,mv))continue;const s=clone(st);s.turn=o;applyMove(s,mv);if(!inCheck(s.board,o))res.push(mv);}return res;}
+function dropPawnMate(st,mv,o){const s=clone(st);s.turn=o;applyMove(s,mv);const opp=o^1;if(!inCheck(s.board,opp))return false;return legalNoDP(s,opp).length===0;}
+function komaLabel(pc){if(pc.t==='K')return KING_LABEL[pc.o];return pc.p?KANJI[pc.t].p:KANJI[pc.t].n;}
+const FW='１２３４５６７８９',KAN='一二三四五六七八九';
+function moveNote(mv,boardBefore,mover,lastSq){const mk=mover===0?'☗':'☖';let sq;
+  if(lastSq&&lastSq[0]===mv.tr&&lastSq[1]===mv.tc)sq='同';else sq=FW[9-mv.tc-1]+KAN[mv.tr];
+  let name,suf='';if(mv.drop){name=KANJI[mv.fc].n;suf='打';}else{name=komaLabel(boardBefore[mv.fr][mv.fc]);if(mv.promote)suf='成';}
+  return mk+sq+name+suf;}
+
+/* ================= 状態 ================= */
+const N={ ws:null, room:null, name:null, seatToken:null, myColor:null, isSpectator:false, connected:false };
+let S=null;            // {board,hands,turn}
+let kifu=[], lastSq=null, over=false;
+let selected=null, legalForSel=[], sel=null;
+
+const $=id=>document.getElementById(id);
+function komaEl(pc,extra){const d=document.createElement('div');
+  const flip = pc.o!==(N.isSpectator?0:N.myColor);   // 自分の駒は正立、相手の駒は反転
+  d.className='koma '+(flip?'flip ':'')+(pc.p?'promoted ':'')+(extra||'');
+  const name=komaLabel(pc);let inner;
+  if(name.length>=2){d.classList.add('two');inner='<span>'+name[0]+'</span><span>'+name.slice(1)+'</span>';}else inner='<span>'+name+'</span>';
+  d.innerHTML='<div class="edge"></div><div class="shape"></div><div class="label">'+inner+'</div>';return d;}
+
+function viewpoint(){return N.isSpectator?0:(N.myColor||0);}
+function toDisp(r,c){return viewpoint()===0?[r,c]:[8-r,8-c];}
+function fromDisp(dr,dc){return viewpoint()===0?[dr,dc]:[8-dr,8-dc];}
+
+function render(){
+  const boardEl=$('board');boardEl.innerHTML='';
+  for(let dr=0;dr<9;dr++)for(let dc=0;dc<9;dc++){
+    const [r,c]=fromDisp(dr,dc);
+    const cell=document.createElement('div');cell.className='cell';cell.dataset.dr=dr;cell.dataset.dc=dc;
+    if(lastMove){ if(!lastMove.drop&&lastMove.fr===r&&lastMove.fc===c)cell.classList.add('lastfrom'); if(lastMove.tr===r&&lastMove.tc===c)cell.classList.add('lastto'); }
+    if(selected&&selected.r===r&&selected.c===c)cell.classList.add('sel');
+    const pc=S.board[r][c];if(pc)cell.appendChild(komaEl(pc));
+    if(selected){const hit=legalForSel.find(m=>m.tr===r&&m.tc===c);if(hit){const dot=document.createElement('div');dot.className=S.board[r][c]?'dot cap':'dot';cell.appendChild(dot);}}
+    cell.addEventListener('click',()=>onCell(r,c));
+    boardEl.appendChild(cell);
+  }
+  // 持ち駒: 手前=自分, 上=相手（観戦は先手=下）
+  const me=viewpoint(), opp=me^1;
+  renderHand($('standBottom'), me);
+  renderHand($('standTop'), opp);
+  $('botName').textContent = seatName(me)+'（'+(me===0?'▲先手':'△後手')+'）';
+  $('topName').textContent = seatName(opp)+'（'+(opp===0?'▲先手':'△後手')+'）';
+  $('botDot').className='turn-dot'+(S.turn===me&&!over?' on':'');
+  $('topDot').className='turn-dot'+(S.turn===opp&&!over?' on':'');
+}
+let lastMove=null;
+function seatName(color){ // color=0/1 -> 対応する席名（seat index == color）
+  if(rosterNames && rosterNames[color]) return rosterNames[color];
+  return color===N.myColor?'あなた':'相手';
+}
+let rosterNames=[null,null];
+const HAND_ORDER=['R','B','G','S','N','L','P'];
+function renderHand(el,owner){[...el.querySelectorAll('.hand-piece')].forEach(n=>n.remove());
+  for(const t of HAND_ORDER){const n=S.hands[owner][t]||0;if(n<=0)continue;
+    const w=document.createElement('div');w.className='hand-piece';w.appendChild(komaEl({t,o:owner,p:false},'hand'));
+    if(n>1){const b=document.createElement('div');b.className='hand-count';b.textContent=n;w.appendChild(b);}
+    if(selected&&selected.hand===t&&selected.owner===owner)w.style.outline='2px solid var(--accent)';
+    w.addEventListener('click',()=>onHand(owner,t));el.appendChild(w);}}
+
+function myTurn(){return !N.isSpectator && !over && S && S.turn===N.myColor;}
+function curLegal(){return legalMoves(S,S.turn);}
+function onCell(r,c){
+  if(!myTurn())return;const pc=S.board[r][c];
+  if(selected){const hit=legalForSel.find(m=>m.tr===r&&m.tc===c);if(hit){doMove(hit);return;}}
+  if(pc&&pc.o===N.myColor){selected={r,c};legalForSel=curLegal().filter(m=>!m.drop&&m.fr===r&&m.fc===c);render();return;}
+  selected=null;legalForSel=[];render();}
+function onHand(owner,t){if(!myTurn()||owner!==N.myColor)return;selected={hand:t,owner};legalForSel=curLegal().filter(m=>m.drop&&m.fc===t);render();}
+function doMove(mv){
+  if(!mv.drop){const both=legalForSel.filter(m=>m.tr===mv.tr&&m.tc===mv.tc);
+    if(both.some(m=>m.promote)&&both.some(m=>!m.promote)){askPromo(S.board[mv.fr][mv.fc],yes=>commit(both.find(m=>m.promote===yes)));return;}}
+  commit(mv);}
+function commit(mv){
+  // 自分の手番で着手 → ローカル適用＋サーバへ送信
+  applyLocal(mv, N.myColor);
+  send({type:'move', mv});
+  selected=null;legalForSel=[];render();
+  checkEndAfterMyMove();
+}
+function applyLocal(mv, mover){
+  const boardBefore=S.board.map(r=>r.map(c=>c?{...c}:null));
+  applyMove(S,mv);
+  kifu.push(moveNote(mv,boardBefore,mover,lastSq));lastSq=[mv.tr,mv.tc];lastMove={fr:mv.fr,fc:mv.fc,tr:mv.tr,tc:mv.tc,drop:mv.drop};
+  renderKifu();
+}
+function checkEndAfterMyMove(){
+  // 相手が詰みなら通知
+  if(legalMoves(S,S.turn).length===0){ over=true; send({type:'end', reason:'checkmate', winner:N.myColor}); showResult('あなたの勝ち（詰み）'); }
+  else updateStatus();
+}
+function renderKifu(){const el=$('kifu');el.innerHTML='';kifu.forEach((t,i)=>{const d=document.createElement('div');d.innerHTML='<span class="no">'+(i+1)+'</span>'+t;el.appendChild(d);});el.scrollTop=el.scrollHeight;}
+function updateStatus(){
+  if(over)return;
+  if(!bothPresent){ setStatus('対局相手を待っています…','warn'); return; }
+  const chk=S&&inCheck(S.board,S.turn);
+  if(N.isSpectator){ setStatus((S.turn===0?'▲先手':'△後手')+'の手番'+(chk?'（王手）':''), chk?'check':''); return; }
+  if(S.turn===N.myColor) setStatus(chk?'王手されています！あなたの手番':'あなたの手番です', chk?'check':'');
+  else setStatus(chk?'王手！相手の手番':'相手の手番です', chk?'check':'');
+}
+function setStatus(t,cls){$('status').textContent=t;$('status').className='status'+(cls?' '+cls:'');}
+
+/* 成りダイアログ */
+let promoCb=null;
+function askPromo(pc,cb){promoCb=cb;$('promoText').textContent=komaLabel(pc)+'　成りますか？';$('promoOverlay').classList.add('on');}
+$('promoYes').onclick=()=>{$('promoOverlay').classList.remove('on');const f=promoCb;promoCb=null;if(f)f(true);};
+$('promoNo').onclick=()=>{$('promoOverlay').classList.remove('on');const f=promoCb;promoCb=null;if(f)f(false);};
+
+function showResult(text){$('resultText').textContent=text;$('result').classList.add('on');}
+$('resultBtn').onclick=()=>{ send({type:'rematch'}); $('resultBtn').textContent='相手の承諾を待っています…'; $('resultBtn').disabled=true; };
+
+/* ================= 通信 ================= */
+let bothPresent=false;
+function wsURL(){return (location.protocol==='https:'?'wss':'ws')+'://'+location.host;}
+function connect(){
+  N.ws=new WebSocket(wsURL());
+  N.ws.onopen=()=>{ N.connected=true; $('connState').textContent='接続済み';
+    send({type:'join', room:N.room, name:N.name, seatToken:N.seatToken}); };
+  N.ws.onclose=()=>{ N.connected=false; $('connState').textContent='切断（再接続中…）';
+    if(!leftByUser) setTimeout(connect, 1500); };
+  N.ws.onerror=()=>{};
+  N.ws.onmessage=(e)=>{ let m; try{m=JSON.parse(e.data);}catch{return;} handle(m); };
+}
+function send(o){ try{ if(N.ws&&N.ws.readyState===1) N.ws.send(JSON.stringify(o)); }catch(_){}}
+let leftByUser=false;
+
+function newGameState(){ S={board:initBoard(),hands:[{},{}],turn:0}; kifu=[];lastSq=null;lastMove=null;over=false;selected=null;legalForSel=[]; }
+
+function handle(m){
+  if(m.type==='error'){ setStatus(m.msg,'warn'); if($('lobby').offsetParent!==null) $('lobbyMsg').textContent=m.msg; return; }
+  if(m.type==='joined'){
+    $('lobby').classList.add('hidden');$('game').classList.remove('hidden');
+    if(m.seat==='spectator'){ N.isSpectator=true; N.myColor=0; $('colorLabel').textContent='観戦'; $('resignBtn').classList.add('hidden'); }
+    else{ N.isSpectator=false; N.myColor=m.seat; N.seatToken=m.seatToken||N.seatToken; localStorage.setItem('shogi_seat_'+N.room, JSON.stringify({token:N.seatToken})); $('colorLabel').textContent=(m.seat===0?'▲ 先手':'△ 後手'); }
+    $('roomLabel').textContent=N.room;
+    return;
+  }
+  if(m.type==='players'){ rosterNames=m.names||[null,null]; bothPresent=m.connected&&m.connected[0]&&m.connected[1]; if(S)render(); updateStatus(); return; }
+  if(m.type==='sync'){ // 現局面の再構築（再接続・観戦・入室直後）
+    newGameState();
+    (m.moves||[]).forEach(mv=>{ const mover=S.turn; applyLocal(mv, mover); });
+    over=!!m.over; if(m.over&&m.result){ /* 結果は end で来る場合もある */ }
+    render(); updateStatus();
+    if(m.started) $('game').classList.remove('hidden');
+    return;
+  }
+  if(m.type==='start'){ if(!S) newGameState(); bothPresent=true; over=false; render(); updateStatus(); return; }
+  if(m.type==='move'){ // 相手の手
+    const mover=S.turn; applyLocal(m.mv, mover); selected=null;legalForSel=[]; render();
+    // 自分が詰まされていないか（表示のみ。勝敗確定は打った側のendで来る）
+    updateStatus();
+    return;
+  }
+  if(m.type==='end'){ over=true;
+    let txt;
+    if(m.draw) txt='引き分け';
+    else if(m.reason==='resign') txt=(m.winner===N.myColor)?'あなたの勝ち（相手の投了）':(N.isSpectator?((m.winner===0?'▲先手':'△後手')+'の勝ち（投了）'):'あなたの負け（投了）');
+    else txt=(m.winner===N.myColor)?'あなたの勝ち':(N.isSpectator?((m.winner===0?'▲先手':'△後手')+'の勝ち'):'あなたの負け');
+    if(m.reason==='checkmate') txt+='（詰み）';
+    showResult(txt); setStatus(txt);
+    return;
+  }
+  if(m.type==='rematchWanted'){ if(!N.isSpectator && m.seat!==N.myColor) setStatus('相手が再戦を希望しています。「再戦を申し込む」を押すと始まります。','warn'); return; }
+  if(m.type==='restart'){ newGameState(); $('result').classList.remove('on'); $('resultBtn').textContent='再戦を申し込む'; $('resultBtn').disabled=false; render(); updateStatus(); return; }
+  if(m.type==='left'){ bothPresent=false; if(!over) setStatus('相手が切断しました（戻ってくるのを待っています）','warn'); return; }
+  if(m.type==='chat'){ const log=$('chatLog'); const d=document.createElement('div'); d.innerHTML='<b>'+esc(m.name)+'</b>: '+esc(m.text); log.appendChild(d); log.scrollTop=log.scrollHeight; return; }
+}
+function esc(s){return String(s).replace(/[&<>]/g,x=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[x]));}
+
+/* ================= ロビー操作 ================= */
+$('joinBtn').onclick=()=>{
+  const name=$('nameInput').value.trim()||'対局者';
+  const room=$('roomInput').value.trim();
+  if(!room){ $('lobbyMsg').textContent='合言葉を入れてください'; return; }
+  N.name=name; N.room=room;
+  try{ const saved=JSON.parse(localStorage.getItem('shogi_name')||'null'); }catch(_){}
+  localStorage.setItem('shogi_name', name);
+  try{ const s=JSON.parse(localStorage.getItem('shogi_seat_'+room)||'null'); if(s&&s.token) N.seatToken=s.token; }catch(_){}
+  newGameState();
+  connect();
+};
+$('resignBtn').onclick=()=>{ if(over||N.isSpectator)return; if(confirm('投了しますか？')){ send({type:'resign'}); } };
+$('leaveBtn').onclick=()=>{ leftByUser=true; try{N.ws&&N.ws.close();}catch(_){}
+  location.reload(); };
+$('chatSend').onclick=sendChat; $('chatInput').addEventListener('keydown',e=>{if(e.key==='Enter')sendChat();});
+function sendChat(){const t=$('chatInput').value.trim();if(!t)return;send({type:'chat',text:t});$('chatInput').value='';}
+
+// 名前の復元
+try{ const nm=localStorage.getItem('shogi_name'); if(nm) $('nameInput').value=nm; }catch(_){}
+</script>
