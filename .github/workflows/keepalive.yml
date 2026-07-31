@@ -1,0 +1,21 @@
+name: keepalive
+# Render無料プランのスリープ(15分)防止：10分おきに /health をping
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch: {}
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping health endpoint
+        run: |
+          URL="https://shogi-online-as2s.onrender.com/health"
+          for i in 1 2 3 4; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 60 "$URL" || echo 000)
+            echo "attempt $i -> HTTP $code"
+            if [ "$code" = "200" ]; then exit 0; fi
+            sleep 25
+          done
+          echo "note: 200が得られませんでした（起動中の可能性）。ジョブは失敗扱いにしません。"
+          exit 0
