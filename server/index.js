@@ -61,7 +61,7 @@ wss.on('connection', (ws) => {
       const name = String(msg.name || '対局者').trim().slice(0, 20) || '対局者';
       if (!code) return sendTo(ws, { type:'error', msg:'合言葉を入力してください' });
       let r = rooms.get(code);
-      if (!r) { r = { seats:[null,null], spectators:new Set(), moves:[], turn:0, started:false, over:false, result:null, rematch:[false,false], lastActivity:Date.now() }; rooms.set(code, r); }
+      if (!r) { r = { seats:[null,null], spectators:new Set(), moves:[], turn:0, started:false, over:false, result:null, rematch:[false,false], voice:[false,false], lastActivity:Date.now() }; rooms.set(code, r); }
       r.lastActivity = Date.now();
 
       // 再接続（token一致の「切断中」の席だけ復帰。接続中の席は奪わない）
@@ -132,6 +132,24 @@ wss.on('connection', (ws) => {
       }
       return;
     }
+    if (msg.type === 'voice') {
+      // 通話は対局者2人のみ。観戦者は不可。シグナリングは相手席にだけ中継（観戦者へは絶対に流さない）
+      if (seat !== 0 && seat !== 1) return;
+      if (!room.voice) room.voice = [false, false];
+      const other = seat ^ 1;
+      const otherWs = (room.seats[other] && room.seats[other].connected) ? room.seats[other].ws : null;
+      if (msg.sub === 'join') {
+        room.voice[seat] = true;
+        if (otherWs) sendTo(otherWs, { type:'voice', sub:'join', fromSeat:seat });
+        if (room.voice[other]) sendTo(ws, { type:'voice', sub:'join', fromSeat:other }); // 相手が既に通話中なら双方に通知
+      } else if (msg.sub === 'leave') {
+        room.voice[seat] = false;
+        if (otherWs) sendTo(otherWs, { type:'voice', sub:'leave', fromSeat:seat });
+      } else if (msg.sub === 'signal') {
+        if (otherWs) sendTo(otherWs, { type:'voice', sub:'signal', fromSeat:seat, signal: msg.signal });
+      }
+      return;
+    }
     if (msg.type === 'chat') {
       const text = String(msg.text || '').slice(0, 200);
       if (!text) return;
@@ -148,6 +166,7 @@ wss.on('connection', (ws) => {
     if (seat === 'spec') { room.spectators.delete(ws); }
     else if (seat === 0 || seat === 1) {
       if (room.seats[seat] && room.seats[seat].ws === ws) { room.seats[seat].connected = false; room.seats[seat].ws = null; }
+      if (room.voice && room.voice[seat]) { room.voice[seat] = false; const o = room.seats[seat^1]; if (o && o.ws) sendTo(o.ws, { type:'voice', sub:'leave', fromSeat:seat }); }
       broadcast(room, { type:'left', seat });
     }
     room.lastActivity = Date.now();

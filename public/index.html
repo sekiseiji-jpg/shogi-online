@@ -90,9 +90,13 @@
   <div id="game" class="hidden">
     <div class="bar">
       <button id="resignBtn">投了</button>
+      <button id="voiceBtn">🎤 通話</button>
+      <button id="muteBtn" class="hidden">🔇 ミュート</button>
       <button id="leaveBtn">退室</button>
       <span id="connState" style="align-self:center;font-size:12px;color:#a99;"></span>
     </div>
+    <div id="voiceState" class="info hidden"></div>
+    <audio id="remoteAudio" autoplay playsinline></audio>
     <div class="stand top" id="standTop">
       <div class="stand-label"><span id="topName">相手</span><span><span id="topDot" class="turn-dot"></span></span></div>
     </div>
@@ -295,7 +299,7 @@ function handle(m){
   if(m.type==='error'){ setStatus(m.msg,'warn'); if($('lobby').offsetParent!==null) $('lobbyMsg').textContent=m.msg; return; }
   if(m.type==='joined'){
     $('lobby').classList.add('hidden');$('game').classList.remove('hidden');
-    if(m.seat==='spectator'){ N.isSpectator=true; N.myColor=0; $('colorLabel').textContent='観戦'; $('resignBtn').classList.add('hidden'); }
+    if(m.seat==='spectator'){ N.isSpectator=true; N.myColor=0; $('colorLabel').textContent='観戦'; $('resignBtn').classList.add('hidden'); $('voiceBtn').classList.add('hidden'); }
     else{ N.isSpectator=false; N.myColor=m.seat; N.seatToken=m.seatToken||N.seatToken; localStorage.setItem('shogi_seat_'+N.room, JSON.stringify({token:N.seatToken})); $('colorLabel').textContent=(m.seat===0?'▲ 先手':'△ 後手'); }
     $('roomLabel').textContent=N.room;
     return;
@@ -328,8 +332,73 @@ function handle(m){
   if(m.type==='rematchWanted'){ if(!N.isSpectator && m.seat!==N.myColor) setStatus('相手が再戦を希望しています。「再戦を申し込む」を押すと始まります。','warn'); return; }
   if(m.type==='restart'){ newGameState(); $('result').classList.remove('on'); $('resultBtn').textContent='再戦を申し込む'; $('resultBtn').disabled=false; render(); updateStatus(); return; }
   if(m.type==='left'){ bothPresent=false; if(!over) setStatus('相手が切断しました（戻ってくるのを待っています）','warn'); return; }
+  if(m.type==='voice'){ onVoiceMsg(m); return; }
   if(m.type==='chat'){ const log=$('chatLog'); const d=document.createElement('div'); d.innerHTML='<b>'+esc(m.name)+'</b>: '+esc(m.text); log.appendChild(d); log.scrollTop=log.scrollHeight; return; }
 }
+
+/* ================= 音声通話（対局者2人だけ。WebRTC P2P） ================= */
+const ICE={iceServers:[
+  {urls:'stun:stun.l.google.com:19302'},
+  {urls:'turn:openrelay.metered.ca:80', username:'openrelayproject', credential:'openrelayproject'},
+  {urls:'turn:openrelay.metered.ca:443', username:'openrelayproject', credential:'openrelayproject'}
+]};
+let vpc=null, localStream=null, inCall=false, peerInCall=false, muted=false;
+function setVoiceState(t){ const el=$('voiceState'); if(!t){el.classList.add('hidden');return;} el.classList.remove('hidden'); el.textContent=t; }
+function newPeer(){
+  const pc=new RTCPeerConnection(ICE);
+  if(localStream) localStream.getTracks().forEach(tr=>pc.addTrack(tr, localStream));
+  pc.onicecandidate=(e)=>{ if(e.candidate) send({type:'voice',sub:'signal',signal:{candidate:e.candidate}}); };
+  pc.ontrack=(e)=>{ $('remoteAudio').srcObject=e.streams[0]; };
+  pc.onconnectionstatechange=()=>{ if(['connected'].includes(pc.connectionState)) setVoiceState('🎧 通話中（相手とつながりました）'); };
+  return pc;
+}
+async function joinVoice(){
+  if(N.isSpectator) return;
+  try{ localStream=await navigator.mediaDevices.getUserMedia({audio:true,video:false}); }
+  catch(e){ setVoiceState('マイクを使えませんでした（許可が必要です）'); return; }
+  inCall=true; muted=false;
+  $('voiceBtn').textContent='📞 通話をやめる';
+  $('muteBtn').classList.remove('hidden'); $('muteBtn').textContent='🔇 ミュート';
+  setVoiceState('🎤 通話に参加しました（相手の参加を待っています）');
+  send({type:'voice',sub:'join'});
+}
+function leaveVoice(){
+  inCall=false; peerInCall=false;
+  try{ if(vpc){vpc.close(); vpc=null;} }catch(_){}
+  if(localStream){ localStream.getTracks().forEach(t=>t.stop()); localStream=null; }
+  $('remoteAudio').srcObject=null;
+  $('voiceBtn').textContent='🎤 通話'; $('muteBtn').classList.add('hidden'); setVoiceState('');
+  send({type:'voice',sub:'leave'});
+}
+function toggleMute(){ if(!localStream)return; muted=!muted; localStream.getAudioTracks().forEach(t=>t.enabled=!muted);
+  $('muteBtn').textContent=muted?'🔈 ミュート解除':'🔇 ミュート'; }
+async function startOfferIfNeeded(){
+  // 席番号の小さい方（先手=席0）がオファーを出す
+  if(!inCall || !peerInCall) return;
+  if(N.myColor!==0) return;
+  if(!vpc) vpc=newPeer();
+  const offer=await vpc.createOffer(); await vpc.setLocalDescription(offer);
+  send({type:'voice',sub:'signal',signal:{sdp:vpc.localDescription}});
+}
+async function onVoiceMsg(m){
+  if(N.isSpectator) return; // 観戦者は通話に一切関与しない
+  if(m.sub==='join'){ peerInCall=true; if(inCall){ setVoiceState('🎧 接続中…'); startOfferIfNeeded(); } return; }
+  if(m.sub==='leave'){ peerInCall=false; try{if(vpc){vpc.close();vpc=null;}}catch(_){}; $('remoteAudio').srcObject=null; if(inCall) setVoiceState('🎤 通話に参加中（相手の参加を待っています）'); return; }
+  if(m.sub==='signal'){
+    if(!inCall) return; const sig=m.signal||{};
+    if(!vpc) vpc=newPeer();
+    try{
+      if(sig.sdp){
+        await vpc.setRemoteDescription(sig.sdp);
+        if(sig.sdp.type==='offer'){ const ans=await vpc.createAnswer(); await vpc.setLocalDescription(ans); send({type:'voice',sub:'signal',signal:{sdp:vpc.localDescription}}); }
+      } else if(sig.candidate){ try{ await vpc.addIceCandidate(sig.candidate); }catch(_){}
+      }
+    }catch(_){}
+    return;
+  }
+}
+$('voiceBtn').onclick=()=>{ if(N.isSpectator)return; inCall?leaveVoice():joinVoice(); };
+$('muteBtn').onclick=toggleMute;
 function esc(s){return String(s).replace(/[&<>]/g,x=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[x]));}
 
 /* ================= ロビー操作 ================= */
