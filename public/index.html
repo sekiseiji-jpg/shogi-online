@@ -78,7 +78,9 @@
   <h1>本将棋 オンライン対戦</h1>
 
   <div class="lobby" id="lobby">
-    <p>友だちと同じ<b>合言葉</b>を入れて「入室」すると対局できます。先に入った人が先手（▲）、次の人が後手（△）です。3人目からは観戦になります。</p>
+    <p>入室には<b>パスワード</b>が必要です。パスワードを入れ、友だちと同じ<b>合言葉</b>を入れて「入室」すると対局できます。先に入った人が先手（▲）、次の人が後手（△）です。3人目からは観戦になります。</p>
+    <label>パスワード</label>
+    <input id="passInput" type="password" maxlength="40" placeholder="パスワード" autocomplete="off">
     <label>お名前</label>
     <input id="nameInput" maxlength="20" placeholder="例：せき">
     <label>合言葉（部屋名）</label>
@@ -176,7 +178,7 @@ function moveNote(mv,boardBefore,mover,lastSq){const mk=mover===0?'☗':'☖';le
   return mk+sq+name+suf;}
 
 /* ================= 状態 ================= */
-const N={ ws:null, room:null, name:null, seatToken:null, myColor:null, isSpectator:false, connected:false };
+const N={ ws:null, room:null, name:null, password:null, seatToken:null, myColor:null, isSpectator:false, connected:false };
 let S=null;            // {board,hands,turn}
 let kifu=[], lastSq=null, over=false;
 let selected=null, legalForSel=[], sel=null;
@@ -284,7 +286,7 @@ function wsURL(){return (location.protocol==='https:'?'wss':'ws')+'://'+location
 function connect(){
   N.ws=new WebSocket(wsURL());
   N.ws.onopen=()=>{ N.connected=true; $('connState').textContent='接続済み';
-    send({type:'join', room:N.room, name:N.name, seatToken:N.seatToken}); };
+    send({type:'join', room:N.room, name:N.name, seatToken:N.seatToken, password:N.password}); };
   N.ws.onclose=()=>{ N.connected=false; $('connState').textContent='切断（再接続中…）';
     if(!leftByUser) setTimeout(connect, 1500); };
   N.ws.onerror=()=>{};
@@ -405,8 +407,10 @@ function esc(s){return String(s).replace(/[&<>]/g,x=>({'&':'&amp;','<':'&lt;','>
 $('joinBtn').onclick=()=>{
   const name=$('nameInput').value.trim()||'対局者';
   const room=$('roomInput').value.trim();
+  const pass=$('passInput').value;
+  if(!pass){ $('lobbyMsg').textContent='パスワードを入れてください'; return; }
   if(!room){ $('lobbyMsg').textContent='合言葉を入れてください'; return; }
-  N.name=name; N.room=room;
+  N.name=name; N.room=room; N.password=pass;
   try{ const saved=JSON.parse(localStorage.getItem('shogi_name')||'null'); }catch(_){}
   localStorage.setItem('shogi_name', name);
   try{ const s=JSON.parse(localStorage.getItem('shogi_seat_'+room)||'null'); if(s&&s.token) N.seatToken=s.token; }catch(_){}

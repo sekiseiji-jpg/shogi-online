@@ -22,6 +22,9 @@ const wss = new WebSocketServer({ server });
  * } */
 const rooms = new Map();
 const GRACE_MS = 10 * 60 * 1000;   // 空室・切断放置の掃除猶予
+// 入室パスワード。秘密はソースに書かず環境変数で渡す（Render の ROOM_PASSWORD）。
+const ROOM_PASSWORD = process.env.ROOM_PASSWORD || '';
+if (!ROOM_PASSWORD) console.warn('[warn] ROOM_PASSWORD 未設定：全ての入室を拒否します。Renderの環境変数を設定してください。');
 
 function makeToken() { return Math.random().toString(36).slice(2) + Date.now().toString(36); }
 function roomRoster(room){
@@ -57,6 +60,10 @@ wss.on('connection', (ws) => {
     const room = ws.meta.room ? rooms.get(ws.meta.room) : null;
 
     if (msg.type === 'join') {
+      // パスワード認証（未設定なら誰も入室不可＝フェイルクローズ）
+      if (!ROOM_PASSWORD || String(msg.password || '') !== ROOM_PASSWORD) {
+        return sendTo(ws, { type:'error', msg:'パスワードが違います' });
+      }
       const code = String(msg.room || '').trim().slice(0, 40);
       const name = String(msg.name || '対局者').trim().slice(0, 20) || '対局者';
       if (!code) return sendTo(ws, { type:'error', msg:'合言葉を入力してください' });
