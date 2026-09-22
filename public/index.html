@@ -120,56 +120,10 @@
   <div class="btns"><button class="yes" id="promoYes">成る</button><button class="no" id="promoNo">不成</button></div></div></div>
 <div class="result" id="result"><h2 id="resultText"></h2><button id="resultBtn">再戦を申し込む</button></div>
 
+<script src="rules.js"></script>
 <script>
 "use strict";
-/* ================= 将棋エンジン（本体アプリと同一ルール） ================= */
-const KANJI={K:{n:'玉',p:null},R:{n:'飛',p:'龍'},B:{n:'角',p:'馬'},G:{n:'金',p:null},S:{n:'銀',p:'成銀'},N:{n:'桂',p:'成桂'},L:{n:'香',p:'成香'},P:{n:'歩',p:'と'}};
-const KING_LABEL={0:'王',1:'玉'};
-const STEP={G:[[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,0]],S:[[-1,-1],[-1,0],[-1,1],[1,-1],[1,1]],K:[[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]],N:[[-2,-1],[-2,1]],P:[[-1,0]]};
-const GOLD=STEP.G;
-const SLIDE={R:[[-1,0],[1,0],[0,-1],[0,1]],B:[[-1,-1],[-1,1],[1,-1],[1,1]],L:[[-1,0]]};
-function initBoard(){const b=Array.from({length:9},()=>Array(9).fill(null));const back=['L','N','S','G','K','G','S','N','L'];
-  for(let c=0;c<9;c++){b[0][c]={t:back[c],o:1,p:false};b[2][c]={t:'P',o:1,p:false};b[8][c]={t:back[c],o:0,p:false};b[6][c]={t:'P',o:0,p:false};}
-  b[7][7]={t:'R',o:0,p:false};b[7][1]={t:'B',o:0,p:false};b[1][1]={t:'R',o:1,p:false};b[1][7]={t:'B',o:1,p:false};return b;}
-function inZone(r,o){return o===0?r<=2:r>=6;}
-function lastRow(r,o){return o===0?r===0:r===8;}
-function mustPromote(pc,r){if(pc.p)return false;if(pc.t==='P'||pc.t==='L')return lastRow(r,pc.o);if(pc.t==='N')return pc.o===0?r<=1:r>=7;return false;}
-function canPromote(pc,fr,tr){if(pc.p)return false;if(pc.t==='K'||pc.t==='G')return false;return inZone(fr,pc.o)||inZone(tr,pc.o);}
-function pieceMoves(b,r,c){const pc=b[r][c],res=[],o=pc.o,dm=o===0?1:-1;
-  const add=(nr,nc)=>{if(nr<0||nr>8||nc<0||nc>8)return false;const t=b[nr][nc];if(t&&t.o===o)return false;res.push([nr,nc]);return !t;};
-  let sl=null,sd=null;
-  if(pc.p){if(pc.t==='R'){sd=SLIDE.R;sl=[[-1,-1],[-1,1],[1,-1],[1,1]];}else if(pc.t==='B'){sd=SLIDE.B;sl=[[-1,0],[1,0],[0,-1],[0,1]];}else sl=GOLD;}
-  else{if(pc.t==='R')sd=SLIDE.R;else if(pc.t==='B')sd=SLIDE.B;else if(pc.t==='L')sd=SLIDE.L;else sl=STEP[pc.t];}
-  if(sl)for(const[dr,dc]of sl)add(r+dr*dm,c+dc);
-  if(sd)for(const[dr,dc]of sd){let nr=r,nc=c;while(true){nr+=dr*dm;nc+=dc;if(!add(nr,nc))break;}}
-  return res;}
-function findKing(b,o){for(let r=0;r<9;r++)for(let c=0;c<9;c++){const p=b[r][c];if(p&&p.t==='K'&&p.o===o)return[r,c];}return null;}
-function inCheck(b,o){const k=findKing(b,o);if(!k)return true;const[kr,kc]=k;
-  for(let r=0;r<9;r++)for(let c=0;c<9;c++){const p=b[r][c];if(p&&p.o!==o)for(const[mr,mc]of pieceMoves(b,r,c))if(mr===kr&&mc===kc)return true;}return false;}
-function pushOpts(res,b,r,c,tr,tc){const pc=b[r][c];const f=mustPromote(pc,tr),cp=canPromote(pc,r,tr);
-  if(f)res.push({fr:r,fc:c,tr,tc,promote:true,drop:false});
-  else if(cp){res.push({fr:r,fc:c,tr,tc,promote:true,drop:false});res.push({fr:r,fc:c,tr,tc,promote:false,drop:false});}
-  else res.push({fr:r,fc:c,tr,tc,promote:false,drop:false});}
-function genMoves(st,o){const b=st.board,mv=[];
-  for(let r=0;r<9;r++)for(let c=0;c<9;c++){const pc=b[r][c];if(!pc||pc.o!==o)continue;for(const[tr,tc]of pieceMoves(b,r,c))pushOpts(mv,b,r,c,tr,tc);}
-  const hand=st.hands[o],types=Object.keys(hand).filter(t=>hand[t]>0);
-  if(types.length){const pcol=Array(9).fill(false);
-    for(let r=0;r<9;r++)for(let c=0;c<9;c++){const p=b[r][c];if(p&&p.o===o&&p.t==='P'&&!p.p)pcol[c]=true;}
-    for(let r=0;r<9;r++)for(let c=0;c<9;c++){if(b[r][c])continue;for(const t of types){
-      if((t==='P'||t==='L')&&lastRow(r,o))continue;if(t==='N'&&(o===0?r<=1:r>=7))continue;if(t==='P'&&pcol[c])continue;
-      mv.push({fr:-1,fc:t,tr:r,tc:c,promote:false,drop:true});}}}
-  return mv;}
-function clone(st){return{board:st.board.map(r=>r.map(c=>c?{t:c.t,o:c.o,p:c.p}:null)),hands:[{...st.hands[0]},{...st.hands[1]}],turn:st.turn};}
-function applyMove(st,mv){const b=st.board,o=st.turn;
-  if(mv.drop){b[mv.tr][mv.tc]={t:mv.fc,o,p:false};st.hands[o][mv.fc]--;}
-  else{const pc=b[mv.fr][mv.fc],cap=b[mv.tr][mv.tc];if(cap)st.hands[o][cap.t]=(st.hands[o][cap.t]||0)+1;
-    b[mv.tr][mv.tc]={t:pc.t,o:pc.o,p:pc.p||mv.promote};b[mv.fr][mv.fc]=null;}
-  st.turn=o^1;}
-function capturesKing(st,mv){if(mv.drop)return false;const t=st.board[mv.tr][mv.tc];return !!(t&&t.t==='K');}
-function legalMoves(st,o){const res=[];for(const mv of genMoves(st,o)){if(capturesKing(st,mv))continue;const s=clone(st);s.turn=o;applyMove(s,mv);
-  if(!inCheck(s.board,o)){if(mv.drop&&mv.fc==='P'&&dropPawnMate(st,mv,o))continue;res.push(mv);}}return res;}
-function legalNoDP(st,o){const res=[];for(const mv of genMoves(st,o)){if(capturesKing(st,mv))continue;const s=clone(st);s.turn=o;applyMove(s,mv);if(!inCheck(s.board,o))res.push(mv);}return res;}
-function dropPawnMate(st,mv,o){const s=clone(st);s.turn=o;applyMove(s,mv);const opp=o^1;if(!inCheck(s.board,opp))return false;return legalNoDP(s,opp).length===0;}
+/* ================= 将棋エンジンは rules.js（サーバと共有） ================= */
 function komaLabel(pc){if(pc.t==='K')return KING_LABEL[pc.o];return pc.p?KANJI[pc.t].p:KANJI[pc.t].n;}
 const FW='１２３４５６７８９',KAN='一二三四五六七八九';
 function moveNote(mv,boardBefore,mover,lastSq){const mk=mover===0?'☗':'☖';let sq;
@@ -247,18 +201,13 @@ function commit(mv){
   applyLocal(mv, N.myColor);
   send({type:'move', mv});
   selected=null;legalForSel=[];render();
-  checkEndAfterMyMove();
+  updateStatus();   // 詰みの判定はサーバが行い、'end' で知らせてくる
 }
 function applyLocal(mv, mover){
   const boardBefore=S.board.map(r=>r.map(c=>c?{...c}:null));
   applyMove(S,mv);
   kifu.push(moveNote(mv,boardBefore,mover,lastSq));lastSq=[mv.tr,mv.tc];lastMove={fr:mv.fr,fc:mv.fc,tr:mv.tr,tc:mv.tc,drop:mv.drop};
   renderKifu();
-}
-function checkEndAfterMyMove(){
-  // 相手が詰みなら通知
-  if(legalMoves(S,S.turn).length===0){ over=true; send({type:'end', reason:'checkmate', winner:N.myColor}); showResult('あなたの勝ち（詰み）'); }
-  else updateStatus();
 }
 function renderKifu(){const el=$('kifu');el.innerHTML='';kifu.forEach((t,i)=>{const d=document.createElement('div');d.innerHTML='<span class="no">'+(i+1)+'</span>'+t;el.appendChild(d);});el.scrollTop=el.scrollHeight;}
 function updateStatus(){
@@ -278,19 +227,33 @@ $('promoYes').onclick=()=>{$('promoOverlay').classList.remove('on');const f=prom
 $('promoNo').onclick=()=>{$('promoOverlay').classList.remove('on');const f=promoCb;promoCb=null;if(f)f(false);};
 
 function showResult(text){$('resultText').textContent=text;$('result').classList.add('on');}
+// 終局の表示（'end' 受信時と、終局後の再接続・観戦で 'sync' に結果が入っていた時）
+function showEnd(m){ over=true;
+  let txt;
+  if(m.draw) txt='引き分け';
+  else if(m.reason==='resign') txt=(m.winner===N.myColor&&!N.isSpectator)?'あなたの勝ち（相手の投了）':(N.isSpectator?((m.winner===0?'▲先手':'△後手')+'の勝ち（投了）'):'あなたの負け（投了）');
+  else txt=(m.winner===N.myColor&&!N.isSpectator)?'あなたの勝ち':(N.isSpectator?((m.winner===0?'▲先手':'△後手')+'の勝ち'):'あなたの負け');
+  if(m.reason==='checkmate') txt+='（詰み）';
+  else if(m.reason==='abandon') txt+=N.isSpectator?'（対局者の切断が続いたため）':(m.winner===N.myColor?'（相手の切断が3分続いたため）':'（切断が3分続いたため）');
+  $('resultBtn').classList.toggle('hidden', N.isSpectator);   // 観戦者は再戦できない
+  showResult(txt); setStatus(txt); render();
+}
 $('resultBtn').onclick=()=>{ send({type:'rematch'}); $('resultBtn').textContent='相手の承諾を待っています…'; $('resultBtn').disabled=true; };
 
 /* ================= 通信 ================= */
 let bothPresent=false;
 function wsURL(){return (location.protocol==='https:'?'wss':'ws')+'://'+location.host;}
 function connect(){
-  N.ws=new WebSocket(wsURL());
-  N.ws.onopen=()=>{ N.connected=true; $('connState').textContent='接続済み';
+  // 前の接続が残っていれば閉じる（入室ボタンを押し直すたびに接続が増えないように）
+  if(N.ws){ const old=N.ws; N.ws=null; try{ old.close(); }catch(_){} }
+  const ws=new WebSocket(wsURL()); N.ws=ws;
+  ws.onopen=()=>{ if(ws!==N.ws) return; N.connected=true; $('connState').textContent='接続済み';
     send({type:'join', room:N.room, name:N.name, seatToken:N.seatToken, password:N.password}); };
-  N.ws.onclose=()=>{ N.connected=false; $('connState').textContent='切断（再接続中…）';
+  ws.onclose=()=>{ if(ws!==N.ws) return;   // 自分で閉じた古い接続なら何もしない
+    N.connected=false; $('connState').textContent='切断（再接続中…）';
     if(!leftByUser) setTimeout(connect, 1500); };
-  N.ws.onerror=()=>{};
-  N.ws.onmessage=(e)=>{ let m; try{m=JSON.parse(e.data);}catch{return;} handle(m); };
+  ws.onerror=()=>{};
+  ws.onmessage=(e)=>{ if(ws!==N.ws) return; let m; try{m=JSON.parse(e.data);}catch{return;} if(m&&typeof m==='object') handle(m); };
 }
 function send(o){ try{ if(N.ws&&N.ws.readyState===1) N.ws.send(JSON.stringify(o)); }catch(_){}}
 let leftByUser=false;
@@ -304,36 +267,31 @@ function handle(m){
     if(m.seat==='spectator'){ N.isSpectator=true; N.myColor=0; $('colorLabel').textContent='観戦'; $('resignBtn').classList.add('hidden'); $('voiceBtn').classList.add('hidden'); }
     else{ N.isSpectator=false; N.myColor=m.seat; N.seatToken=m.seatToken||N.seatToken; localStorage.setItem('shogi_seat_'+N.room, JSON.stringify({token:N.seatToken})); $('colorLabel').textContent=(m.seat===0?'▲ 先手':'△ 後手'); }
     $('roomLabel').textContent=N.room;
+    if(inCall && !N.isSpectator) send({type:'voice',sub:'join'});   // 再接続したら通話にも参加し直す
     return;
   }
   if(m.type==='players'){ rosterNames=m.names||[null,null]; bothPresent=m.connected&&m.connected[0]&&m.connected[1]; if(S)render(); updateStatus(); return; }
-  if(m.type==='sync'){ // 現局面の再構築（再接続・観戦・入室直後）
+  if(m.type==='sync'){ // 現局面の再構築（再接続・観戦・入室直後・不正な手の後の送り直し）
     newGameState();
     (m.moves||[]).forEach(mv=>{ const mover=S.turn; applyLocal(mv, mover); });
-    over=!!m.over; if(m.over&&m.result){ /* 結果は end で来る場合もある */ }
+    over=!!m.over;
     render(); updateStatus();
+    if(m.over&&m.result) showEnd(m.result);   // 終局後に戻ってきた時も結果と「再戦」を出す
+    else $('result').classList.remove('on');
     if(m.started) $('game').classList.remove('hidden');
     return;
   }
-  if(m.type==='start'){ if(!S) newGameState(); bothPresent=true; over=false; render(); updateStatus(); return; }
-  if(m.type==='move'){ // 相手の手
+  if(m.type==='start'){ newGameState(); bothPresent=true; $('result').classList.remove('on'); render(); updateStatus(); return; }
+  if(m.type==='move'){ // 相手の手（サーバが合法性を確認済み）
     const mover=S.turn; applyLocal(m.mv, mover); selected=null;legalForSel=[]; render();
-    // 自分が詰まされていないか（表示のみ。勝敗確定は打った側のendで来る）
-    updateStatus();
+    updateStatus();   // 詰みなら続けてサーバから 'end' が来る
     return;
   }
-  if(m.type==='end'){ over=true;
-    let txt;
-    if(m.draw) txt='引き分け';
-    else if(m.reason==='resign') txt=(m.winner===N.myColor)?'あなたの勝ち（相手の投了）':(N.isSpectator?((m.winner===0?'▲先手':'△後手')+'の勝ち（投了）'):'あなたの負け（投了）');
-    else txt=(m.winner===N.myColor)?'あなたの勝ち':(N.isSpectator?((m.winner===0?'▲先手':'△後手')+'の勝ち'):'あなたの負け');
-    if(m.reason==='checkmate') txt+='（詰み）';
-    showResult(txt); setStatus(txt);
-    return;
-  }
+  if(m.type==='end'){ showEnd(m); return; }
   if(m.type==='rematchWanted'){ if(!N.isSpectator && m.seat!==N.myColor) setStatus('相手が再戦を希望しています。「再戦を申し込む」を押すと始まります。','warn'); return; }
   if(m.type==='restart'){ newGameState(); $('result').classList.remove('on'); $('resultBtn').textContent='再戦を申し込む'; $('resultBtn').disabled=false; render(); updateStatus(); return; }
-  if(m.type==='left'){ bothPresent=false; if(!over) setStatus('相手が切断しました（戻ってくるのを待っています）','warn'); return; }
+  if(m.type==='left'){ bothPresent=false; if(!over){ const playing=!$('game').classList.contains('hidden');   // 対局中の切断は3分戻らなければ放棄（サーバが判定）
+    setStatus(N.isSpectator?'対局者が切断しました（戻ってくるのを待っています）':('相手が切断しました（戻ってくるのを待っています'+(playing?'。3分戻らなければあなたの勝ち':'')+'）'),'warn'); } return; }
   if(m.type==='voice'){ onVoiceMsg(m); return; }
   if(m.type==='chat'){ const log=$('chatLog'); const d=document.createElement('div'); d.innerHTML='<b>'+esc(m.name)+'</b>: '+esc(m.text); log.appendChild(d); log.scrollTop=log.scrollHeight; return; }
 }
@@ -411,7 +369,6 @@ $('joinBtn').onclick=()=>{
   if(!pass){ $('lobbyMsg').textContent='パスワードを入れてください'; return; }
   if(!room){ $('lobbyMsg').textContent='合言葉を入れてください'; return; }
   N.name=name; N.room=room; N.password=pass;
-  try{ const saved=JSON.parse(localStorage.getItem('shogi_name')||'null'); }catch(_){}
   localStorage.setItem('shogi_name', name);
   try{ const s=JSON.parse(localStorage.getItem('shogi_seat_'+room)||'null'); if(s&&s.token) N.seatToken=s.token; }catch(_){}
   newGameState();
