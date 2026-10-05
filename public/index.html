@@ -212,7 +212,13 @@ function applyLocal(mv, mover){
 function renderKifu(){const el=$('kifu');el.innerHTML='';kifu.forEach((t,i)=>{const d=document.createElement('div');d.innerHTML='<span class="no">'+(i+1)+'</span>'+t;el.appendChild(d);});el.scrollTop=el.scrollHeight;}
 function updateStatus(){
   if(over)return;
-  if(!bothPresent){ setStatus('対局相手を待っています…','warn'); return; }
+  if(!bothPresent){
+    // 対局が始まっている＝相手が切断した。開始前の「待っています」と区別して、放棄までの案内を出す
+    const playing = !$('game').classList.contains('hidden') && kifu.length>0;
+    if(playing) setStatus(N.isSpectator?'対局者が切断しました（戻ってくるのを待っています）':'相手が切断しました（3分戻らなければあなたの勝ち）','warn');
+    else setStatus('対局相手を待っています…','warn');
+    return;
+  }
   const chk=S&&inCheck(S.board,S.turn);
   if(N.isSpectator){ setStatus((S.turn===0?'▲先手':'△後手')+'の手番'+(chk?'（王手）':''), chk?'check':''); return; }
   if(S.turn===N.myColor) setStatus(chk?'王手されています！あなたの手番':'あなたの手番です', chk?'check':'');
@@ -261,11 +267,17 @@ let leftByUser=false;
 function newGameState(){ S={board:initBoard(),hands:[{},{}],turn:0}; kifu=[];lastSq=null;lastMove=null;over=false;selected=null;legalForSel=[]; }
 
 function handle(m){
-  if(m.type==='error'){ setStatus(m.msg,'warn'); if($('lobby').offsetParent!==null) $('lobbyMsg').textContent=m.msg; return; }
+  if(m.type==='error'){ setStatus(m.msg,'warn'); if($('lobby').offsetParent!==null) $('lobbyMsg').textContent=m.msg;
+    if(m.fatal) leftByUser=true;   // 別のタブに席を渡した時などは、自動再接続して奪い返さない
+    return; }
   if(m.type==='joined'){
     $('lobby').classList.add('hidden');$('game').classList.remove('hidden');
     if(m.seat==='spectator'){ N.isSpectator=true; N.myColor=0; $('colorLabel').textContent='観戦'; $('resignBtn').classList.add('hidden'); $('voiceBtn').classList.add('hidden'); }
-    else{ N.isSpectator=false; N.myColor=m.seat; N.seatToken=m.seatToken||N.seatToken; localStorage.setItem('shogi_seat_'+N.room, JSON.stringify({token:N.seatToken})); $('colorLabel').textContent=(m.seat===0?'▲ 先手':'△ 後手'); }
+    else{ N.isSpectator=false; N.myColor=m.seat; N.seatToken=m.seatToken||N.seatToken;
+      // 席の token はタブごとに持つ（localStorage だと同じブラウザの2つ目のタブが同じ席を奪い合う）
+      try{ sessionStorage.setItem('shogi_seat_'+N.room, JSON.stringify({token:N.seatToken})); }catch(_){}
+      $('colorLabel').textContent=(m.seat===0?'▲ 先手':'△ 後手');
+      $('resignBtn').classList.remove('hidden'); $('voiceBtn').classList.remove('hidden'); }   // 観戦から席に着いた時に出し直す
     $('roomLabel').textContent=N.room;
     if(inCall && !N.isSpectator) send({type:'voice',sub:'join'});   // 再接続したら通話にも参加し直す
     return;
@@ -370,7 +382,13 @@ $('joinBtn').onclick=()=>{
   if(!room){ $('lobbyMsg').textContent='合言葉を入れてください'; return; }
   N.name=name; N.room=room; N.password=pass;
   localStorage.setItem('shogi_name', name);
-  try{ const s=JSON.parse(localStorage.getItem('shogi_seat_'+room)||'null'); if(s&&s.token) N.seatToken=s.token; }catch(_){}
+  // 席の token はこのタブのもの（sessionStorage）だけを使う。古い版が localStorage に残していた分は移して消す
+  try{
+    let s=JSON.parse(sessionStorage.getItem('shogi_seat_'+room)||'null');
+    if(!s){ s=JSON.parse(localStorage.getItem('shogi_seat_'+room)||'null');
+      if(s&&s.token){ sessionStorage.setItem('shogi_seat_'+room, JSON.stringify(s)); localStorage.removeItem('shogi_seat_'+room); } }
+    if(s&&s.token) N.seatToken=s.token;
+  }catch(_){}
   newGameState();
   connect();
 };

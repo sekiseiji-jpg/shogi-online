@@ -52,7 +52,7 @@ function health() {
 const mv = (fr, fc, tr, tc) => ({ fr, fc, tr, tc, promote: false, drop: false });
 
 (async () => {
-  const srv = spawn(process.execPath, [path.join(__dirname, 'index.js')], { env: { ...process.env, PORT: String(PORT), ROOM_PASSWORD: PASS, ABANDON_MS: '1500' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const srv = spawn(process.execPath, [path.join(__dirname, 'index.js')], { env: { ...process.env, PORT: String(PORT), ROOM_PASSWORD: PASS, ABANDON_MS: '1500', TAKEOVER_MS: '1500', MAX_MOVES: '4' }, stdio: ['ignore', 'pipe', 'pipe'] });
   let srvErr = ''; srv.stderr.on('data', d => srvErr += d);
   for (let i = 0; i < 50 && !(await health()); i++) await sleep(100);
 
@@ -178,6 +178,56 @@ const mv = (fr, fc, tr, tc) => ({ fr, fc, tr, tc, promote: false, drop: false })
       const ab = await q.wait('end', () => true, 3000, 0);
       check('切断が続くと放棄で相手の勝ち', ab && [ab.reason, ab.winner], ['abandon', 1]);
       q.ws.close();
+    }
+
+    // ---- 席を奪われた側には理由が届き、自動再接続しない（同じブラウザの2タブで奪い合わないように）----
+    {
+      const p = client(), q = client(); await p.open(); await q.open();
+      p.send({ type: 'join', room: 'r4', name: 'P', password: PASS });
+      const jp = await p.wait('joined');
+      q.send({ type: 'join', room: 'r4', name: 'P2', password: PASS, seatToken: jp.seatToken });   // 同じ token で入り直す
+      const jq = await q.wait('joined');
+      const kicked = await p.wait('error', m => m.fatal === true, 1500, 0);
+      check('同じ token で入ると席は新しい方へ', jq && jq.seat, 0);
+      check('奪われた側には fatal のエラーが届く', !!kicked, true);
+      try { p.ws.close(); } catch (_) {} try { q.ws.close(); } catch (_) {}
+    }
+
+    // ---- 終わった対局が残っている部屋に新しい2人が入ったら、前の結果は引き継がない ----
+    {
+      const p = client(), q = client(); await p.open(); await q.open();
+      p.send({ type: 'join', room: 'r5', name: 'P', password: PASS }); const jp = await p.wait('joined');
+      q.send({ type: 'join', room: 'r5', name: 'Q', password: PASS }); await q.wait('joined');
+      await q.wait('start', () => true, 1000, 0);
+      p.send({ type: 'move', mv: mv(6, 2, 5, 2) }); await q.wait('move');
+      p.send({ type: 'resign' }); await q.wait('end');
+      await p.close(); await q.close();
+      await sleep(1700);                       // 席が譲られるまで待つ（テストは ABANDON/TAKEOVER=1.5 秒相当）
+      const x = client(), y = client(); await x.open(); await y.open();
+      x.send({ type: 'join', room: 'r5', name: 'X', password: PASS }); const jx = await x.wait('joined');
+      const syx = await x.wait('sync', () => true, 1500, 0);
+      y.send({ type: 'join', room: 'r5', name: 'Y', password: PASS }); await y.wait('joined');
+      const started = await y.wait('start', () => true, 1500, 0);
+      check('新しい人が座ると前の対局の結果は消える', syx && [syx.over, syx.moves.length], [false, 0]);
+      check('  2人そろえば新しい対局が始まる', !!started, true);
+      try { x.ws.close(); } catch (_) {} try { y.ws.close(); } catch (_) {}
+    }
+
+    // ---- 手数の上限に達したら、黙って捨てずにエラーと局面を返す（テストでは MAX_MOVES=4）----
+    {
+      const p = client(), q = client(); await p.open(); await q.open();
+      p.send({ type: 'join', room: 'r6', name: 'P', password: PASS }); await p.wait('joined');
+      q.send({ type: 'join', room: 'r6', name: 'Q', password: PASS }); await q.wait('joined');
+      await q.wait('start', () => true, 1000, 0);
+      const seq = [[p, mv(6, 2, 5, 2)], [q, mv(2, 6, 3, 6)], [p, mv(6, 6, 5, 6)], [q, mv(2, 2, 3, 2)]];
+      for (const [who, m] of seq) { const other = who === p ? q : p; const k = other.mark(); who.send({ type: 'move', mv: m }); await other.wait('move', undefined, 1500, k); }
+      const k2 = p.mark();
+      p.send({ type: 'move', mv: mv(6, 0, 5, 0) });   // 5手目＝上限超え
+      const err = await p.wait('error', undefined, 1500, k2);
+      const sy = await p.wait('sync', undefined, 1500, k2);
+      check('手数の上限を超えた手はエラーで知らせる', err && err.msg, 'この対局は手数の上限に達しました');
+      check('  局面も送り直す（画面がずれない）', sy && sy.moves.length, 4);
+      try { p.ws.close(); } catch (_) {} try { q.ws.close(); } catch (_) {}
     }
 
     for (const c of [b, sp, intr, a2, a3]) { try { c.ws.close(); } catch (_) {} }

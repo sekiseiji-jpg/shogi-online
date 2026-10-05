@@ -24,10 +24,10 @@ const wss = new WebSocketServer({ server, maxPayload: 64 * 1024 });   // 巨大�
  * } */
 const rooms = new Map();
 const GRACE_MS = 10 * 60 * 1000;     // 空室・切断放置の掃除猶予
-const TAKEOVER_MS = 3 * 60 * 1000;   // 切断した席を別の人に譲るまでの猶予（それまでは本人の復帰を待つ）
+const TAKEOVER_MS = Number(process.env.TAKEOVER_MS) || 3 * 60 * 1000;   // 切断した席を別の人に譲るまでの猶予（それまでは本人の復帰を待つ。テスト用に環境変数で短くできる）
 // 対局中に切断したまま戻らない人は、この時間で放棄（相手の勝ち）とする。テスト用に環境変数で短くできる
 const ABANDON_MS = Number(process.env.ABANDON_MS) || TAKEOVER_MS;
-const MAX_MOVES = 1000;              // 1局の手数の上限（無限に伸ばさせない）
+const MAX_MOVES = Number(process.env.MAX_MOVES) || 1000;   // 1局の手数の上限（無限に伸ばさせない。テスト用に環境変数で短くできる）
 // 入室パスワード。秘密はソースに書かず環境変数で渡す（Render の ROOM_PASSWORD）。
 const ROOM_PASSWORD = process.env.ROOM_PASSWORD || '';
 if (!ROOM_PASSWORD) console.warn('[warn] ROOM_PASSWORD 未設定：全ての入室を拒否します。Renderの環境変数を設定してください。');
@@ -68,6 +68,7 @@ function detach(ws){
   else if (seat === 0 || seat === 1) {
     const s = room.seats[seat];
     if (s && s.ws === ws) { s.connected = false; s.ws = null; s.leftAt = Date.now(); }
+    room.rematch[seat] = false;   // 切断したら再戦の希望は取り消す（席が人に渡った後も残っていた）
     if (room.voice && room.voice[seat]) { room.voice[seat] = false; const o = room.seats[seat^1]; if (o && o.ws) sendTo(o.ws, { type:'voice', sub:'leave', fromSeat:seat }); }
     broadcast(room, { type:'left', seat });
   }
@@ -117,14 +118,21 @@ function onJoin(ws, msg){
   if (!r) { r = { seats:[null,null], spectators:new Set(), moves:[], state:newState(), turn:0, started:false, over:false, result:null, rematch:[false,false], voice:[false,false], lastActivity:Date.now() }; rooms.set(code, r); }
   r.lastActivity = Date.now();
 
-  // 1) 再接続：token が一致すれば、その席に戻る。サーバがまだ切断に気付いていない（半開き）古い接続は切る
+  // 1) 再接続：token が一致すれば、その席に戻る。サーバがまだ切断に気付いていない（半開き）古い接続は切る。
+  //    ただし、その席の接続が生きている（ping に応答している）なら奪わない。奪い合うと、切られた側が自動再接続して
+  //    切り返し、同じブラウザで2つ開いただけで無限に切断・再接続を繰り返してしまう（2026-10-03 修正）
   let seat = null;
   const tok = typeof msg.seatToken === 'string' ? msg.seatToken : null;
   if (tok) {
     for (let i=0;i<2;i++) {
       const s = r.seats[i];
       if (s && s.token === tok) {
-        if (s.ws && s.ws !== ws) { try { s.ws.meta.room = null; s.ws.terminate(); } catch(_){} }
+        if (s.ws && s.ws !== ws) {
+          // 席は新しい接続に渡すが、切られる側には理由を伝えてから切る。
+          // fatal を受けたクライアントは自動再接続しないので、2つのタブが交互に切り合う無限ループにならない
+          sendTo(s.ws, { type:'error', fatal:true, msg:'同じ席に別のタブ（または端末）から入室したため、この画面は切断されました' });
+          try { s.ws.meta.room = null; setTimeout(()=>{ try{ s.ws.terminate(); }catch(_){} }, 50); } catch(_){}
+        }
         seat = i; break;
       }
     }
@@ -145,9 +153,16 @@ function onJoin(ws, msg){
     sendTo(ws, { type:'joined', seat:'spectator', room:code });
   } else {
     const prev = r.seats[seat];
-    const token = (prev && prev.token === tok) ? prev.token : makeToken();   // 別人が座る時は新しい token
+    const reconnect = !!(prev && prev.token === tok);
+    const token = reconnect ? prev.token : makeToken();   // 別人が座る時は新しい token
     r.seats[seat] = { name, token, ws, connected:true, leftAt:0 };
     ws.meta.seat = seat;
+    if (!reconnect) {
+      r.rematch[seat] = false;   // 前の人の「再戦希望」を引き継がない
+      // 終わった対局が残っている部屋に新しい人が座ったら、その対局は片付けて次の開始を待つ
+      // （以前は started が false に戻らず、無関係な2人が他人の終局結果を見せられていた）
+      if (r.over) { r.started = false; r.over = false; r.result = null; r.moves = []; r.state = newState(); r.turn = 0; r.rematch = [false,false]; }
+    }
     sendTo(ws, { type:'joined', seat, room:code, seatToken:token, name });
   }
   // 満席になったら開始（開始の通知は開始した時の1回だけ。入室のたびに送ると終局表示が消えていた）
@@ -176,7 +191,10 @@ function onMessage(ws, msg){
     if (seat !== room.turn) return sendTo(ws, { type:'error', msg:'あなたの手番ではありません' });
     const mv = findLegal(room, seat, msg.mv);
     if (!mv) { sendTo(ws, { type:'error', msg:'その手は指せません' }); return sendTo(ws, syncMsg(room, ws)); }   // 不正な手は局面を送り直して揃える
-    if (room.moves.length >= MAX_MOVES) return;
+    if (room.moves.length >= MAX_MOVES) {   // 上限に達したら、黙って捨てずに知らせて局面を揃える
+      sendTo(ws, { type:'error', msg:'この対局は手数の上限に達しました' });
+      return sendTo(ws, syncMsg(room, ws));
+    }
     R.applyMove(room.state, mv);
     room.moves.push(mv);
     room.turn = room.state.turn;
