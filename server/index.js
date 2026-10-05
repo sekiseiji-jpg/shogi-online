@@ -13,6 +13,9 @@ const R = require('../public/rules.js');
 const app = express();
 app.use(express.static(path.join(__dirname, '..', 'public')));
 app.get('/health', (_req, res) => res.type('text').send('ok'));
+// 本番にどの版が出ているか確認用。本体を更新したらこの文字列を上げる。
+const VERSION = '2026-10-05a';
+app.get('/version', (_req, res) => res.type('text').send(VERSION));
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, maxPayload: 64 * 1024 });   // 巨大メッセージでメモリを使い切らせない
